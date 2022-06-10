@@ -1,0 +1,240 @@
+
+from sklearn.metrics import *
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
+import numpy as np
+import pandas as pd
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
+import time
+import collections
+from sklearn.model_selection import StratifiedKFold, RandomizedSearchCV
+
+
+eval_svm = {"accuracy":[], "precision":[], "fpr":[], "tpr":[], "thresholds":[], "arc":[], "apr":[], "train_time":[], "inference_time":[] }
+eval_gnb = {"accuracy":[], "precision":[], "fpr":[], "tpr":[], "thresholds":[], "arc":[], "apr":[], "train_time":[], "inference_time":[] }
+eval_rf = {"accuracy":[], "precision":[], "fpr":[], "tpr":[], "thresholds":[], "arc":[], "apr":[], "train_time":[], "inference_time":[] }
+eval_knn = {"accuracy":[], "precision":[], "fpr":[], "tpr":[], "thresholds":[], "arc":[], "apr":[], "train_time":[], "inference_time":[] }
+
+eval_models = [eval_knn, eval_svm, eval_rf, eval_gnb]
+models_name =["KNN", "SVM", "RF", "GNB"]
+
+# std_accuracy = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+# std_precision = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+# std_fpr = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+# std_tpr = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+# std_arc = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+# std_apr = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+# std_train_time = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+# std_inference_time = {'knn':None, 'svm': None, 'rf':None, 'gnb': None}
+
+#evaluation
+
+def get_accuracy(dic_model, y_pred, y_test):
+    dic_model["accuracy"].append(accuracy_score(y_test, y_pred))
+
+def get_precision(dic_model, y_pred, y_test):
+    dic_model["precision"].append(precision_score(y_test, y_pred,average='weighted',labels=np.unique(y_pred)))
+
+def get_ftr_ptr(dic_model, y_pred, y_test):
+
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred)  # add parametr pos_label???
+    dic_model['fpr'].append(fpr)
+    dic_model['tpr'].append(tpr)
+    dic_model['thresholds'].append(thresholds)
+
+
+
+
+def get_auc_roc_curve(dic_model, y_pred, y_test):
+    dic_model["arc"].append(roc_auc_score(y_test, y_pred,average="samples"))
+
+def get_auc_precision_recall(dic_model, y_pred, y_test):
+    # Data to plot precision - recall curve
+    precision, recall, thresholds = precision_recall_curve(y_test, y_pred)
+    # Use AUC function to calculate the area under the curve of precision recall curve
+    auc_precision_recall = auc(recall, precision)
+    dic_model["apr"].append(auc_precision_recall)
+
+# def get_training_time(dic_model, time):
+#     dic_model["train_time"].append(time)
+def get_training_time(dic_model,m, X_train, y_train):
+
+    start_train_time = time.time()
+    m.fit(X_train, y_train)
+    stop_train_time = time.time()
+    train_time = stop_train_time - start_train_time
+    dic_model["train_time"].append(train_time)
+
+
+# def get_inference_time(dic_model, time):
+#     #for 1000 instances
+#     dic_model["inference_time"].append(time)
+#
+def get_inference_time(dic_model,m,X_test):
+    #for 1000 instances
+    start_inference = time.time()
+    m.predict(X_test)
+    stop_inference = time.time()
+    time_inference = stop_inference - start_inference
+    dic_model["inference_time"].append(time_inference)
+
+
+# hyperparameters
+def knn_best_param(x, y):
+    # array of k candidate
+    k = np.arange(1, 70, 3)
+    leaf = np.arange(10, 100, 10)
+    param = {'n_neighbors': k, 'leaf_size' :leaf}
+    knn = KNeighborsClassifier()
+    random_search = RandomizedSearchCV(knn, param, cv=3)
+    random_search.fit(x, y)
+    return random_search.best_params_
+
+def svm_best_param(x, y):
+    C = np.arange(1, 50, 5)
+    gamma = [1,0.1,0.01,0.001]
+    param = {'C': C, 'gamma': gamma}
+    svm = SVC()
+    random_search = RandomizedSearchCV(svm, param, cv=3)
+    random_search.fit(x, y)
+    return random_search.best_params_
+
+def rf_best_param(x, y):
+    n_estimators = [int(x) for x in np.linspace(start = 60, stop = 120, num = 20)]
+    max_features = ['auto', 'sqrt']
+    param = {'max_features': max_features, 'n_estimators' : n_estimators}
+    rf = RandomForestClassifier()
+    random_search = RandomizedSearchCV(rf, param, cv=3)
+    random_search.fit(x, y)
+    return random_search.best_params_
+
+
+
+def model():
+    # -cross validation split=10
+    skf = StratifiedKFold(n_splits=10, random_state=None)
+    # X is the feature set and y is the target
+
+    actual_classes = np.empty([0], dtype=int)
+    predicted_classes = np.empty([0], dtype=int)
+
+
+    for train_index, test_index in skf.split(X, y):
+        # print("Train:", train_index, "Validation:", test_index)
+        X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+        y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+
+        # KNN
+        parm_optimal_knn = knn_best_param(X_train, y_train)
+        knn_model = KNeighborsClassifier(n_neighbors=parm_optimal_knn["n_neighbors"],leaf_size=parm_optimal_knn["leaf_size"])
+
+        # SVM
+        parm_optimal_svm = svm_best_param(X_train, y_train)
+        svm_model = SVC(C=parm_optimal_svm["C"],gamma=parm_optimal_svm["gamma"])
+
+        # RF
+        parm_optimal_rf = rf_best_param(X_train, y_train)
+        rf_model = RandomForestClassifier(n_estimators=parm_optimal_rf["n_estimators"],max_features=parm_optimal_rf["max_features"])
+
+        # GNB
+        gnb_model = GaussianNB()
+
+        models = [knn_model, svm_model, rf_model, gnb_model]
+
+        for m,d in zip(models, eval_models) :
+            actual_classes = np.append(actual_classes, y_test)
+
+            #start_train_time = time.time()
+            m.fit(X_train, y_train)
+            #stop_train_time = time.time()
+            #train_time = stop_train_time - start_train_time
+
+
+            predicted_classes = np.append(predicted_classes, m.predict(X_test))
+
+            #start_inference = time.time()
+            y_pred = m.predict(X_test)
+            #stop_inference = time.time()
+
+            #time_inference = stop_inference - start_inference
+            if (file == "bank.csv") :
+                get_inference_time(d, m,X_test)
+#            get_inference_time(d, time_inference)
+
+            get_accuracy(d, y_pred, y_test)
+            get_precision(d, y_pred, y_test)
+            get_ftr_ptr(d, y_pred, y_test)
+            get_auc_roc_curve(d, y_pred, y_test)
+            get_auc_precision_recall(d, y_pred, y_test)
+            #get_training_time(d, train_time)
+
+            get_training_time(d, m, X_train, y_train)
+    return actual_classes, predicted_classes
+
+
+
+
+def display_accuracy_precision(model):
+    acc = model["accuracy"]
+    pre = model["precision"]
+
+    acc = np.array(acc)
+    print("     STD accuracy:{}".format(acc.std()))
+    print("     Mean accuracy :{}".format(acc.mean()))
+
+    pre = np.array(pre)
+    print("     STD precision:{}".format(pre.std()))
+    print("     Mean precision :{}".format(pre.mean()))
+
+
+if __name__ == "__main__":
+
+    #class
+    files_load = ["blood.csv","acute-nephritis.csv","bank.csv","breast-cancer.csv", "acute-inflammation.csv", "breast-cancer-wisc.csv", "breast-cancer-wisc-diag.csv" ,"congressional-voting.csv", "chess-krvkp.csv", "breast-cancer-wisc-prog.csv" ]
+
+
+    # seed remove the randome effect from RandomizedSearchCV so every run it will give the same result
+    # np.random.seed(seed=20)
+
+    # Load the Diabetes dataset form list
+    for file in files_load:
+        df = pd.read_csv(f'C:\classification_datasets\{file}'.format())
+
+
+        print("-----------------------",file,"----------------------------")
+
+        #change all  name target to class
+        len_col_target =len(df.columns.values)-1
+        df.columns.values[len_col_target] = "class"
+        # print(df.columns.values[len_col_target])
+        # print(df.columns.values)
+        X = df.drop('class', axis=1)  # Feature Matrix
+        y = df['class']  # Target Variable
+        #X = df.drop(df.columns[len_col_target], axis=1)
+        # print(X)
+
+        y = df['class']  # Target Variable
+
+        model()
+
+
+        print("----------------KNN-------------------------")
+        [print(key,':',value) for key, value in eval_knn.items()]
+
+        print("----------------SVM-------------------------")
+        [print(key,':',value) for key, value in eval_svm.items()]
+
+        print("----------------RF-------------------------")
+        [print(key,':',value) for key, value in eval_rf.items()]
+
+        print("----------------GNB-------------------------")
+        [print(key,':',value) for key, value in eval_gnb.items()]
+
+        print("----------------END-------------------------")
+
+
+        for name, eval_m in zip(models_name, eval_models) :
+            print(name)
+            display_accuracy_precision(eval_m)
+
